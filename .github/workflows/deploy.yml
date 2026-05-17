@@ -42,8 +42,19 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:v1.0.0
 
       - name: Deploy en EC2 frontend
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          echo "Deploy a EC2 pendiente — agregar SSH key y IP cuando estén las instancias"
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 446584031738.dkr.ecr.us-east-1.amazonaws.com
+            docker pull 446584031738.dkr.ecr.us-east-1.amazonaws.com/casino-frontend:latest
+            docker stop casino-frontend || true
+            docker rm casino-frontend || true
+            docker run -d \
+              --name casino-frontend \
+              --restart unless-stopped \
+              -p 80:8080 \
+              -e BACKEND_HOST=${{ secrets.BACKEND_PRIVATE_IP }} \
+              446584031738.dkr.ecr.us-east-1.amazonaws.com/casino-frontend:latest
