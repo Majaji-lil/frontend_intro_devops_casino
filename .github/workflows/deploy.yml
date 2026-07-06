@@ -8,6 +8,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: casino-frontend
+  EKS_CLUSTER: casino-vidal-cluster
 
 jobs:
   build-push-deploy:
@@ -16,6 +17,11 @@ jobs:
     steps:
       - name: Checkout código
         uses: actions/checkout@v4
+
+      - name: Ejecutar tests del frontend
+        run: |
+          npm install
+          npm test -- --watch=false --browsers=ChromeHeadless
 
       - name: Configurar credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -41,20 +47,11 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:v1.0.0
 
-      - name: Deploy en EC2 frontend
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 446584031738.dkr.ecr.us-east-1.amazonaws.com
-            docker pull 446584031738.dkr.ecr.us-east-1.amazonaws.com/casino-frontend:latest
-            docker stop casino-frontend || true
-            docker rm casino-frontend || true
-            docker run -d \
-              --name casino-frontend \
-              --restart unless-stopped \
-              -p 80:8080 \
-              -e BACKEND_HOST=${{ secrets.BACKEND_PRIVATE_IP }} \
-              446584031738.dkr.ecr.us-east-1.amazonaws.com/casino-frontend:latest
+      - name: Deploy en EKS
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
+          kubectl set image deployment/casino-frontend casino-frontend=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          kubectl rollout status deployment/casino-frontend --timeout=300s
